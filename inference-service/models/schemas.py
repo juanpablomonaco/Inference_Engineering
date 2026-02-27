@@ -130,20 +130,14 @@ class IngestResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class HealthResponse(BaseModel):
-    """Estado del sistema. Retorna 503 si algún flag es False."""
+    """Estado del sistema. Retorna 503 si algún flag core es False."""
 
-    status: str = Field(
-        description="'ok' si el sistema está listo, 'unavailable' si no."
-    )
-    model_loaded: bool = Field(
-        description="True si el modelo de embeddings fue cargado correctamente."
-    )
-    corpus_initialized: bool = Field(
-        description="True si los embeddings del corpus fueron precomputados."
-    )
-    cache_ready: bool = Field(
-        description="True si el cache de embeddings fue inicializado."
-    )
+    status: str = Field(description="'ok' si el sistema core está listo.")
+    model_loaded: bool = Field(description="True si el modelo de embeddings cargó.")
+    corpus_initialized: bool = Field(description="True si el corpus fue indexado en ChromaDB.")
+    cache_ready: bool = Field(description="True si el cache L1 fue inicializado.")
+    redis_connected: bool = Field(description="True si Redis está disponible (opcional).")
+    ollama_ready: bool = Field(description="True si Ollama está disponible para /rag (opcional).")
 
 
 # ---------------------------------------------------------------------------

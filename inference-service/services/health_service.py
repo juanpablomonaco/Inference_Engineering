@@ -33,25 +33,30 @@ class HealthStatus:
     model_loaded: bool = False
     corpus_initialized: bool = False
     cache_ready: bool = False
+    redis_connected: bool = False   # Fase 4: opcional, no bloquea readiness
+    ollama_ready: bool = False      # Fase 3: opcional, solo /rag lo requiere
 
     def set_model_loaded(self, value: bool) -> None:
-        """Marca el modelo como cargado (o no)."""
         self.model_loaded = value
 
     def set_corpus_initialized(self, value: bool) -> None:
-        """Marca el corpus como precomputado (o no)."""
         self.corpus_initialized = value
 
     def set_cache_ready(self, value: bool) -> None:
-        """Marca el cache como inicializado (o no)."""
         self.cache_ready = value
+
+    def set_redis_connected(self, value: bool) -> None:
+        """Redis es opcional — no bloquea el readiness del servicio core."""
+        self.redis_connected = value
+
+    def set_ollama_ready(self, value: bool) -> None:
+        """Ollama es opcional — solo /rag lo requiere."""
+        self.ollama_ready = value
 
     def is_ready(self) -> bool:
         """
-        Retorna True solo si TODOS los componentes están inicializados.
-
-        Este método es evaluado por el endpoint GET /health para determinar
-        el HTTP status code: 200 si True, 503 si False.
+        Core readiness: modelo + corpus + cache in-memory.
+        Redis y Ollama son opcionales — su ausencia no bloquea /search.
         """
         return self.model_loaded and self.corpus_initialized and self.cache_ready
 
@@ -62,6 +67,8 @@ class HealthStatus:
             "model_loaded": self.model_loaded,
             "corpus_initialized": self.corpus_initialized,
             "cache_ready": self.cache_ready,
+            "redis_connected": self.redis_connected,
+            "ollama_ready": self.ollama_ready,
         }
 
 

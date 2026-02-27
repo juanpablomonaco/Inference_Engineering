@@ -30,6 +30,7 @@ import services.search_service as search_service
 import services.embedding_service as embedding_service
 import services.vector_store as vector_store
 import services.rag_service as rag_service
+import services.redis_cache as redis_cache
 from services.health_service import health_status
 from services.metrics_store import metrics
 from services.ollama_client import OllamaUnavailableError
@@ -75,13 +76,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         # En producción podrías hacer raise aquí para fallar el startup
         # y forzar un restart del contenedor.
 
-    # [2] Inicializar ChromaDB vector store
+    # [2] Inicializar Redis cache (Fase 4) — opcional, no bloquea startup
+    try:
+        redis_cache.init_redis()
+        health_status.set_redis_connected(redis_cache.is_available())
+    except Exception as e:
+        logger.warning("redis_init_failed", extra={"error": str(e)})
+        health_status.set_redis_connected(False)
+
+    # [3] Inicializar ChromaDB vector store
     try:
         vector_store.init_store()
     except Exception as e:
         logger.error("vector_store_init_failed", extra={"error": str(e)})
 
-    # [3] Indexar corpus seed en ChromaDB (idempotente via upsert)
+    # [4] Indexar corpus seed en ChromaDB (idempotente via upsert)
     try:
         search_service.precompute()
         health_status.set_corpus_initialized(True)
@@ -91,15 +100,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         health_status.set_corpus_initialized(False)
         health_status.set_cache_ready(False)
 
-    # [4] Verificar Ollama y descargar modelo si es necesario (Fase 3)
+    # [5] Verificar Ollama y descargar modelo si es necesario (Fase 3)
     try:
-        if not rag_service.is_ollama_available():
+        ollama_ok = rag_service.is_ollama_available()
+        if not ollama_ok:
             logger.info("ollama_model_not_found_pulling", extra={"model": rag_service.OLLAMA_MODEL})
             rag_service.get_ollama_client().pull_model()
-        else:
+            ollama_ok = rag_service.is_ollama_available()
+        health_status.set_ollama_ready(ollama_ok)
+        if ollama_ok:
             logger.info("ollama_ready", extra={"model": rag_service.OLLAMA_MODEL})
     except Exception as e:
         # Ollama no disponible no bloquea el startup — /search sigue funcionando
+        health_status.set_ollama_ready(False)
         logger.warning("ollama_unavailable_at_startup", extra={"error": str(e)})
 
     startup_elapsed = (time.perf_counter() - startup_start) * 1000
@@ -130,7 +143,7 @@ app = FastAPI(
         "Servicio de inferencia educativo que demuestra embeddings, "
         "búsqueda semántica y observabilidad con FastAPI + SentenceTransformers."
     ),
-    version="4.0.0",
+    version="5.0.0",
     lifespan=lifespan,
 )
 
