@@ -18,6 +18,7 @@ from typing import Any
 # POST /embedding
 # ---------------------------------------------------------------------------
 
+
 class EmbeddingRequest(BaseModel):
     """Cuerpo de la request para generar un embedding."""
 
@@ -36,9 +37,7 @@ class EmbeddingResponse(BaseModel):
     embedding: list[float] = Field(
         description="Vector de embedding como lista de floats (384 dimensiones)."
     )
-    dimension: int = Field(
-        description="Número de dimensiones del vector."
-    )
+    dimension: int = Field(description="Número de dimensiones del vector.")
     cache_hit: bool = Field(
         description="True si el embedding fue recuperado del cache en memoria."
     )
@@ -50,6 +49,7 @@ class EmbeddingResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # POST /search
 # ---------------------------------------------------------------------------
+
 
 class SearchRequest(BaseModel):
     """Cuerpo de la request para búsqueda semántica."""
@@ -80,12 +80,8 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     """Respuesta del endpoint /search."""
 
-    result: str = Field(
-        description="Texto del documento más similar (top-1)."
-    )
-    score: float = Field(
-        description="Score de similitud coseno del top-1 (0.0 a 1.0)."
-    )
+    result: str = Field(description="Texto del documento más similar (top-1).")
+    score: float = Field(description="Score de similitud coseno del top-1 (0.0 a 1.0).")
     results: list[SearchResult] = Field(
         description="Lista completa de resultados top-k."
     )
@@ -97,6 +93,7 @@ class SearchResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # POST /ingest  (Fase 2)
 # ---------------------------------------------------------------------------
+
 
 class IngestRequest(BaseModel):
     """Cuerpo de la request para ingestar un documento."""
@@ -121,7 +118,9 @@ class IngestResponse(BaseModel):
     """Respuesta del endpoint /ingest."""
 
     id: str = Field(description="ID del documento indexado.")
-    total_documents: int = Field(description="Total de documentos en el store tras el upsert.")
+    total_documents: int = Field(
+        description="Total de documentos en el store tras el upsert."
+    )
     elapsed_ms: float = Field(description="Tiempo de procesamiento en milisegundos.")
 
 
@@ -129,37 +128,60 @@ class IngestResponse(BaseModel):
 # GET /health
 # ---------------------------------------------------------------------------
 
+
 class HealthResponse(BaseModel):
     """Estado del sistema. Retorna 503 si algún flag core es False."""
 
     status: str = Field(description="'ok' si el sistema core está listo.")
     model_loaded: bool = Field(description="True si el modelo de embeddings cargó.")
-    corpus_initialized: bool = Field(description="True si el corpus fue indexado en ChromaDB.")
+    corpus_initialized: bool = Field(
+        description="True si el corpus fue indexado en ChromaDB."
+    )
     cache_ready: bool = Field(description="True si el cache L1 fue inicializado.")
-    redis_connected: bool = Field(description="True si Redis está disponible (opcional).")
-    ollama_ready: bool = Field(description="True si Ollama está disponible para /rag (opcional).")
+    redis_connected: bool = Field(
+        description="True si Redis está disponible (opcional)."
+    )
+    ollama_ready: bool = Field(
+        description="True si Ollama está disponible para /rag (opcional)."
+    )
 
 
 # ---------------------------------------------------------------------------
 # GET /metrics
 # ---------------------------------------------------------------------------
 
+
 class MetricsResponse(BaseModel):
     """Snapshot de métricas de observabilidad en tiempo real."""
 
     total_requests: int = Field(description="Total de requests procesadas.")
-    total_embedding_calls: int = Field(description="Total de llamadas al endpoint /embedding.")
-    total_search_calls: int = Field(description="Total de llamadas al endpoint /search.")
-    avg_embedding_ms: float = Field(description="Latencia promedio de generación de embedding (ms).")
-    avg_search_ms: float = Field(description="Latencia promedio de búsqueda semántica (ms).")
-    cache_hits: int = Field(description="Número de veces que el embedding fue encontrado en cache.")
-    cache_misses: int = Field(description="Número de veces que el embedding fue computado desde cero.")
-    cache_hit_ratio: float = Field(description="Ratio de efectividad del cache (0.0 a 1.0).")
+    total_embedding_calls: int = Field(
+        description="Total de llamadas al endpoint /embedding."
+    )
+    total_search_calls: int = Field(
+        description="Total de llamadas al endpoint /search."
+    )
+    avg_embedding_ms: float = Field(
+        description="Latencia promedio de generación de embedding (ms)."
+    )
+    avg_search_ms: float = Field(
+        description="Latencia promedio de búsqueda semántica (ms)."
+    )
+    cache_hits: int = Field(
+        description="Número de veces que el embedding fue encontrado en cache."
+    )
+    cache_misses: int = Field(
+        description="Número de veces que el embedding fue computado desde cero."
+    )
+    cache_hit_ratio: float = Field(
+        description="Ratio de efectividad del cache (0.0 a 1.0)."
+    )
 
 
 # ---------------------------------------------------------------------------
 # POST /rag  (Fase 3)
 # ---------------------------------------------------------------------------
+
 
 class RagRequest(BaseModel):
     """Cuerpo de la request para RAG."""
@@ -194,6 +216,7 @@ class RagResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Modelo genérico para respuestas de error
 # ---------------------------------------------------------------------------
+
 
 class ErrorResponse(BaseModel):
     """Respuesta estándar para errores HTTP."""

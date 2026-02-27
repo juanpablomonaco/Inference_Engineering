@@ -90,9 +90,7 @@ class MetricsStore:
 
         total_cache_ops = self.cache_hits + self.cache_misses
         cache_hit_ratio = (
-            self.cache_hits / total_cache_ops
-            if total_cache_ops > 0
-            else 0.0
+            self.cache_hits / total_cache_ops if total_cache_ops > 0 else 0.0
         )
 
         return {

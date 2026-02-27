@@ -33,8 +33,8 @@ class HealthStatus:
     model_loaded: bool = False
     corpus_initialized: bool = False
     cache_ready: bool = False
-    redis_connected: bool = False   # Fase 4: opcional, no bloquea readiness
-    ollama_ready: bool = False      # Fase 3: opcional, solo /rag lo requiere
+    redis_connected: bool = False  # Fase 4: opcional, no bloquea readiness
+    ollama_ready: bool = False  # Fase 3: opcional, solo /rag lo requiere
 
     def set_model_loaded(self, value: bool) -> None:
         self.model_loaded = value

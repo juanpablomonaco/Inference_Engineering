@@ -128,9 +128,14 @@ OLLAMA_READY = Gauge(
 # Funciones helper para registrar métricas desde services/
 # ---------------------------------------------------------------------------
 
-def record_request(endpoint: str, method: str, status_code: int, duration_s: float) -> None:
+
+def record_request(
+    endpoint: str, method: str, status_code: int, duration_s: float
+) -> None:
     """Registra una request HTTP completada."""
-    REQUEST_COUNT.labels(endpoint=endpoint, method=method, status_code=str(status_code)).inc()
+    REQUEST_COUNT.labels(
+        endpoint=endpoint, method=method, status_code=str(status_code)
+    ).inc()
     REQUEST_LATENCY.labels(endpoint=endpoint).observe(duration_s)
 
 

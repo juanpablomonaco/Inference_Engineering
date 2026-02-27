@@ -78,11 +78,15 @@ def init_store() -> None:
 def get_collection() -> chromadb.Collection:
     """Retorna la colección activa. Falla si init_store() no fue llamado."""
     if _collection is None:
-        raise RuntimeError("Vector store not initialized. Call init_store() at startup.")
+        raise RuntimeError(
+            "Vector store not initialized. Call init_store() at startup."
+        )
     return _collection
 
 
-def add_documents(ids: list[str], texts: list[str], embeddings: list[list[float]]) -> int:
+def add_documents(
+    ids: list[str], texts: list[str], embeddings: list[list[float]]
+) -> int:
     """
     Agrega documentos al vector store.
 
@@ -148,11 +152,13 @@ def search(query_embedding: list[float], n_results: int = 1) -> list[dict]:
     ids = results["ids"][0]
 
     for doc_text, distance, doc_id in zip(docs, distances, ids):
-        output.append({
-            "id": doc_id,
-            "text": doc_text,
-            "score": round(1.0 - distance, 4),
-        })
+        output.append(
+            {
+                "id": doc_id,
+                "text": doc_text,
+                "score": round(1.0 - distance, 4),
+            }
+        )
 
     return output
 

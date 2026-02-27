@@ -37,6 +37,7 @@ def load_model() -> None:
     logger.info("model_loading_started", extra={"model": MODEL_NAME})
 
     from utils.timer import Timer
+
     with Timer() as t:
         _model = SentenceTransformer(MODEL_NAME)
 

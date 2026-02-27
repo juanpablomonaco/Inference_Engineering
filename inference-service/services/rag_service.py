@@ -43,10 +43,10 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 INFERENCE_BACKEND = os.getenv("INFERENCE_BACKEND", "ollama").lower()
-OLLAMA_BASE_URL   = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-VLLM_BASE_URL     = os.getenv("VLLM_BASE_URL", "http://vllm:8001")
-OLLAMA_MODEL      = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
-RAG_TOP_K         = int(os.getenv("RAG_TOP_K", "3"))
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://vllm:8001")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "3"))
 
 # ---------------------------------------------------------------------------
 # Client factory — lazy-initialized, backend seleccionado por env var
@@ -66,10 +66,16 @@ def get_ollama_client() -> OllamaClient | VLLMClient:
     if _client is None:
         if INFERENCE_BACKEND == "vllm":
             _client = VLLMClient(base_url=VLLM_BASE_URL, model=OLLAMA_MODEL)
-            logger.info("llm_backend_initialized", extra={"backend": "vllm", "url": VLLM_BASE_URL})
+            logger.info(
+                "llm_backend_initialized",
+                extra={"backend": "vllm", "url": VLLM_BASE_URL},
+            )
         else:
             _client = OllamaClient(base_url=OLLAMA_BASE_URL, model=OLLAMA_MODEL)
-            logger.info("llm_backend_initialized", extra={"backend": "ollama", "url": OLLAMA_BASE_URL})
+            logger.info(
+                "llm_backend_initialized",
+                extra={"backend": "ollama", "url": OLLAMA_BASE_URL},
+            )
     return _client
 
 
@@ -115,6 +121,7 @@ Answer based on the context above:"""
 # RAG pipeline
 # ---------------------------------------------------------------------------
 
+
 def rag(query: str, top_k: int | None = None) -> dict:
     """
     Pipeline RAG completo: retrieve → augment → generate.
@@ -133,7 +140,6 @@ def rag(query: str, top_k: int | None = None) -> dict:
     k = top_k if top_k is not None else RAG_TOP_K
 
     with Timer() as total_timer:
-
         # ── Retrieve ─────────────────────────────────────────────────────
         with Timer() as retrieve_timer:
             search_result = search_service.search(query, top_k=k)

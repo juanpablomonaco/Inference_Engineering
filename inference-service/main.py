@@ -38,11 +38,17 @@ from services.ollama_client import OllamaUnavailableError
 from services.auth import require_api_key
 from services.rate_limiter import check_rate_limit
 from models.schemas import (
-    EmbeddingRequest, EmbeddingResponse,
-    SearchRequest, SearchResponse, SearchResult,
-    IngestRequest, IngestResponse,
-    RagRequest, RagResponse,
-    HealthResponse, MetricsResponse,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    SearchRequest,
+    SearchResponse,
+    SearchResult,
+    IngestRequest,
+    IngestResponse,
+    RagRequest,
+    RagResponse,
+    HealthResponse,
+    MetricsResponse,
 )
 from utils.logger import get_logger
 
@@ -52,6 +58,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Lifespan — startup y shutdown de la aplicación
 # ---------------------------------------------------------------------------
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
@@ -107,7 +114,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     try:
         ollama_ok = rag_service.is_ollama_available()
         if not ollama_ok:
-            logger.info("ollama_model_not_found_pulling", extra={"model": rag_service.OLLAMA_MODEL})
+            logger.info(
+                "ollama_model_not_found_pulling",
+                extra={"model": rag_service.OLLAMA_MODEL},
+            )
             rag_service.get_ollama_client().pull_model()
             ollama_ok = rag_service.is_ollama_available()
         health_status.set_ollama_ready(ollama_ok)
@@ -165,6 +175,7 @@ app = FastAPI(
 # Middleware — latencia total por request
 # ---------------------------------------------------------------------------
 
+
 @app.middleware("http")
 async def request_timing_middleware(request: Request, call_next) -> Response:
     """
@@ -205,6 +216,7 @@ async def request_timing_middleware(request: Request, call_next) -> Response:
 # POST /embedding
 # ---------------------------------------------------------------------------
 
+
 @app.post(
     "/embedding",
     response_model=EmbeddingResponse,
@@ -238,6 +250,7 @@ async def create_embedding(
 # ---------------------------------------------------------------------------
 # POST /search
 # ---------------------------------------------------------------------------
+
 
 @app.post(
     "/search",
@@ -282,6 +295,7 @@ async def semantic_search(
 # POST /ingest  (Fase 2)
 # ---------------------------------------------------------------------------
 
+
 @app.post(
     "/ingest",
     response_model=IngestResponse,
@@ -316,6 +330,7 @@ async def ingest_document(
 # POST /rag  (Fase 3)
 # ---------------------------------------------------------------------------
 
+
 @app.post(
     "/rag",
     response_model=RagResponse,
@@ -345,7 +360,7 @@ async def rag_endpoint(
         raise HTTPException(
             status_code=503,
             detail=f"Ollama LLM is unavailable: {str(e)}. "
-                   "Make sure the ollama service is running in docker-compose.",
+            "Make sure the ollama service is running in docker-compose.",
         )
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -363,6 +378,7 @@ async def rag_endpoint(
 # ---------------------------------------------------------------------------
 # GET /health
 # ---------------------------------------------------------------------------
+
 
 @app.get(
     "/health",
@@ -389,6 +405,7 @@ async def health_check() -> JSONResponse:
 # GET /metrics
 # ---------------------------------------------------------------------------
 
+
 @app.get(
     "/metrics",
     response_model=MetricsResponse,
@@ -412,6 +429,7 @@ async def get_metrics() -> MetricsResponse:
 # ---------------------------------------------------------------------------
 # GET /metrics/prometheus  (Fase 5)
 # ---------------------------------------------------------------------------
+
 
 @app.get(
     "/metrics/prometheus",

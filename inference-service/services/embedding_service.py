@@ -71,7 +71,10 @@ def embed(text: str) -> tuple[np.ndarray, bool, float]:
         _l1_cache[text] = redis_vector
         logger.debug(
             "embedding_l2_cache_hit",
-            extra={"text_preview": text[:60], "redis_ms": round(redis_timer.elapsed_ms, 2)},
+            extra={
+                "text_preview": text[:60],
+                "redis_ms": round(redis_timer.elapsed_ms, 2),
+            },
         )
         metrics.record_embedding(redis_timer.elapsed_ms, cache_hit=True)
         return redis_vector, True, redis_timer.elapsed_ms

@@ -57,6 +57,3 @@ class TestMetricsStore:
         assert snap["avg_embedding_ms"] == 0.0
         assert snap["avg_search_ms"] == 0.0
         assert snap["cache_hit_ratio"] == 0.0
-
-
-

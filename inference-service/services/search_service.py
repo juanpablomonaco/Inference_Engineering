@@ -122,7 +122,9 @@ def search(query: str, top_k: int = 1) -> dict:
         raise RuntimeError("Vector store not initialized.")
 
     if vector_store.count() == 0:
-        raise ValueError("No documents in the vector store. Use POST /ingest to add documents.")
+        raise ValueError(
+            "No documents in the vector store. Use POST /ingest to add documents."
+        )
 
     with Timer() as total_timer:
         # Único cómputo ML por request

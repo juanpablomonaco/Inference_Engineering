@@ -32,6 +32,7 @@ GENERATE_TIMEOUT = 120.0  # segundos — generación en CPU puede ser lenta
 
 class OllamaUnavailableError(Exception):
     """Raised cuando Ollama no está disponible o el modelo no está cargado."""
+
     pass
 
 
@@ -68,7 +69,10 @@ class OllamaClient:
             )
             logger.info(
                 "ollama_health_check",
-                extra={"available_models": models, "target_model_ready": model_available},
+                extra={
+                    "available_models": models,
+                    "target_model_ready": model_available,
+                },
             )
             return model_available
         except Exception as e:
@@ -96,7 +100,9 @@ class OllamaClient:
                         logger.info("ollama_pull_progress", extra={"line": line[:100]})
             logger.info("ollama_model_pull_completed", extra={"model": self.model})
         except Exception as e:
-            logger.error("ollama_model_pull_failed", extra={"model": self.model, "error": str(e)})
+            logger.error(
+                "ollama_model_pull_failed", extra={"model": self.model, "error": str(e)}
+            )
             raise OllamaUnavailableError(f"Failed to pull model {self.model}: {e}")
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
@@ -124,8 +130,8 @@ class OllamaClient:
             ],
             "stream": False,  # Respuesta completa, no streaming
             "options": {
-                "temperature": 0.3,    # Baja temperatura para respuestas más factuales
-                "num_predict": 512,    # Máximo de tokens en la respuesta
+                "temperature": 0.3,  # Baja temperatura para respuestas más factuales
+                "num_predict": 512,  # Máximo de tokens en la respuesta
             },
         }
 

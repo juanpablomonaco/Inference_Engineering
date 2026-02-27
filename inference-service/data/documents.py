@@ -26,6 +26,7 @@ class Document:
         id: Identificador único del documento.
         text: Contenido textual que se indexará.
     """
+
     id: str
     text: str
 

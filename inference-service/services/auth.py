@@ -44,9 +44,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _raw_keys = os.getenv("API_KEYS", "")
-VALID_API_KEYS: set[str] = {
-    k.strip() for k in _raw_keys.split(",") if k.strip()
-}
+VALID_API_KEYS: set[str] = {k.strip() for k in _raw_keys.split(",") if k.strip()}
 
 AUTH_ENABLED = len(VALID_API_KEYS) > 0
 

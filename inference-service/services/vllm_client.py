@@ -39,6 +39,7 @@ GENERATE_TIMEOUT = 120.0
 
 class VLLMUnavailableError(Exception):
     """Raised cuando vLLM no está disponible."""
+
     pass
 
 
@@ -72,7 +73,10 @@ class VLLMClient:
             model_ready = any(self.model in mid for mid in model_ids)
             logger.info(
                 "vllm_health_check",
-                extra={"available_models": model_ids, "target_model_ready": model_ready},
+                extra={
+                    "available_models": model_ids,
+                    "target_model_ready": model_ready,
+                },
             )
             return model_ready
         except Exception as e:
