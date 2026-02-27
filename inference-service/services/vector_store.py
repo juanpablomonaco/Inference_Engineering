@@ -25,7 +25,6 @@ Seam de evolución:
 
 import chromadb
 from chromadb.config import Settings
-import numpy as np
 
 from utils.logger import get_logger
 from utils.timer import Timer

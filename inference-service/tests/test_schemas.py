@@ -13,8 +13,6 @@ from models.schemas import (
     SearchRequest,
     IngestRequest,
     RagRequest,
-    SearchResponse,
-    EmbeddingResponse,
     MetricsResponse,
 )
 

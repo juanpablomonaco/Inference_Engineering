@@ -33,8 +33,8 @@ import os
 from utils.logger import get_logger
 from utils.timer import Timer
 import services.search_service as search_service
-from services.ollama_client import OllamaClient, OllamaUnavailableError
-from services.vllm_client import VLLMClient, VLLMUnavailableError
+from services.ollama_client import OllamaClient
+from services.vllm_client import VLLMClient
 
 logger = get_logger(__name__)
 

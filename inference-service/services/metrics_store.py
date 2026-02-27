@@ -14,7 +14,7 @@ simples de Python (GIL protege int/float). En producción con múltiples
 workers se usaría threading.Lock o métricas fuera del proceso.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
