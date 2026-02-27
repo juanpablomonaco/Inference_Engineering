@@ -5,21 +5,31 @@
 # Servicios:
 #   inference-service : FastAPI + SentenceTransformers (Python)
 #   ollama            : LLM local para generación RAG (Fase 3)
-#   redis             : Cache distribuido de embeddings (Fase 4)
+#   redis             : Cache L2 + Rate Limiting (Fase 4)
+#   prometheus        : Scraping de métricas (Fase 6)
+#   grafana           : Dashboards P50/P95/P99 (Fase 6)
+#   redis-exporter    : Métricas de Redis para Prometheus (Fase 6)
 #
-# Para correr (stack completo):
-#   docker compose up --build          # primera vez
-#   docker compose up                  # siguientes veces
-#   docker compose up -d               # modo detached (background)
-#   docker compose logs -f             # ver logs en tiempo real
-#   docker compose down                # detener
+# Perfiles de ejecución:
+#   Stack completo:
+#     docker compose up --build
 #
-# Solo inferencia (sin RAG/Redis):
-#   docker compose up inference-service
+#   Solo inferencia core (sin RAG ni observabilidad):
+#     docker compose up inference-service redis --build
 #
-# Nota sobre el startup:
-#   Primera vez: ~5-10 min (build + descarga modelo HF + descarga modelo Ollama)
-#   Siguientes:  ~15-30s (modelos cacheados en volúmenes)
+#   Con observabilidad pero sin RAG:
+#     docker compose up inference-service redis prometheus grafana redis-exporter
+#
+#   Con variables de entorno personalizadas:
+#     cp .env.example .env  # editar .env
+#     docker compose --env-file .env up --build
+#
+# Accesos:
+#   API:       http://localhost:8000
+#   Swagger:   http://localhost:8000/docs
+#   Grafana:   http://localhost:3000  (admin / admin)
+#   Prometheus http://localhost:9090
+#   Ollama:    http://localhost:11434
 # ---------------------------------------------------------------------------
 
 version: "3.9"
@@ -37,21 +47,24 @@ services:
     ports:
       - "8000:8000"
 
+    env_file:
+      - .env   # carga variables desde .env si existe (ver .env.example)
+
     environment:
       - HF_HOME=/app/.cache/huggingface
-      - LOG_LEVEL=INFO
-      # Fase 3: URL del servicio Ollama
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=llama3.2:1b
-      - RAG_TOP_K=3
-      # Fase 4: URL de Redis
-      - REDIS_URL=redis://redis:6379
-      - REDIS_EMBEDDING_TTL=86400
-      - RATE_LIMIT_REQUESTS=60
-      - RATE_LIMIT_WINDOW_SECONDS=60
-      # Fase 5: API Keys (vacío = auth desactivada para desarrollo)
-      # Para activar: API_KEYS=your-secret-key-1,your-secret-key-2
-      - API_KEYS=
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:1b}
+      - INFERENCE_BACKEND=${INFERENCE_BACKEND:-ollama}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8001}
+      - RAG_TOP_K=${RAG_TOP_K:-3}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - REDIS_EMBEDDING_TTL=${REDIS_EMBEDDING_TTL:-86400}
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-60}
+      - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
+      - API_KEYS=${API_KEYS:-}
+      # Multi-worker: número de procesos Uvicorn
+      - WORKERS=${WORKERS:-1}
 
     volumes:
       - huggingface-cache:/app/.cache/huggingface
@@ -82,12 +95,10 @@ services:
       - "11434:11434"
 
     volumes:
-      # Persiste los modelos descargados (~1-8GB dependiendo del modelo)
       - ollama-models:/root/.ollama
 
     restart: unless-stopped
 
-    # Health check: verifica que la API de Ollama responda
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
       interval: 10s
@@ -95,7 +106,7 @@ services:
       retries: 5
       start_period: 30s
 
-    # Nota: para usar GPU, descomentar:
+    # GPU support (descomentar si tenés NVIDIA):
     # deploy:
     #   resources:
     #     reservations:
@@ -105,7 +116,7 @@ services:
     #           capabilities: [gpu]
 
 
-  # ── Redis — Cache distribuido de embeddings (Fase 4) ─────────────────────
+  # ── Redis — Cache L2 + Rate Limiting (Fase 4) ────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: redis
@@ -113,10 +124,7 @@ services:
     ports:
       - "6379:6379"
 
-    # Configuración de persistencia Redis:
-    # appendonly yes → AOF (Append Only File) — persiste cada write
-    # Alternativa: rdb snapshots (--save 60 1)
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
 
     volumes:
       - redis-data:/data
@@ -131,22 +139,110 @@ services:
       start_period: 10s
 
 
+  # ── Prometheus — Scraping de métricas (Fase 6) ───────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: prometheus
+
+    ports:
+      - "9090:9090"
+
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"   # retener 15 días de datos
+      - "--web.enable-lifecycle"               # permite reload sin restart
+
+    depends_on:
+      - inference-service
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+
+  # ── Grafana — Dashboards P50/P95/P99 (Fase 6) ───────────────────────────
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: grafana
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # Deshabilitar analytics para desarrollo
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+
+    volumes:
+      # Datasource precargado (Prometheus)
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Dashboard precargado (Inference Engineering)
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Persistencia de datos de Grafana
+      - grafana-data:/var/lib/grafana
+
+    depends_on:
+      - prometheus
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+
+  # ── Redis Exporter — métricas Redis para Prometheus (Fase 6) ────────────
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.66.0
+    container_name: redis-exporter
+
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+
+    ports:
+      - "9121:9121"
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+
 # ---------------------------------------------------------------------------
 # Volúmenes nombrados
 # ---------------------------------------------------------------------------
 volumes:
-  # Cache de HuggingFace — modelos de embedding (~90MB)
   huggingface-cache:
     driver: local
 
-  # Vector store ChromaDB — embeddings + HNSW index (Fase 2)
   chroma-data:
     driver: local
 
-  # Modelos Ollama — LLM local (~1-8GB) (Fase 3)
   ollama-models:
     driver: local
 
-  # Redis AOF — cache de embeddings persistente (Fase 4)
   redis-data:
+    driver: local
+
+  prometheus-data:
+    driver: local
+
+  grafana-data:
     driver: local

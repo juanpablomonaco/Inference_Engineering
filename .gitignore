@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# .gitignore — Inference Engineering
+# ---------------------------------------------------------------------------
+
+# ── Secrets — NUNCA commitear ────────────────────────────────────────────
+.env
+.env.local
+.env.production
+*.key
+*.pem
+secrets/
+
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Docker volumes locales ───────────────────────────────────────────────
+# (los volúmenes reales están en /var/lib/docker/volumes)
+chroma_data/
+redis_data/
+
+# ── HuggingFace models cacheados localmente ──────────────────────────────
+.cache/
+
+# ── macOS ─────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+
+# ── IDEs ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Go ────────────────────────────────────────────────────────────────────
+inference-client/vendor/

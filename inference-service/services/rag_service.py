@@ -1,29 +1,32 @@
 """
 rag_service.py
 --------------
-Implementa Retrieval-Augmented Generation (RAG) combinando:
-  1. Retrieval: búsqueda semántica sobre ChromaDB (search_service)
-  2. Augmentation: construcción del prompt con el contexto recuperado
-  3. Generation: llamada a Ollama (LLM local) para generar la respuesta
+Implementa el pipeline RAG con backend de generación swappeable.
+
+Fase 6: soporta dos backends via INFERENCE_BACKEND env var:
+  - "ollama" (default): desarrollo local, CPU, modelos ~1-7B
+  - "vllm":            producción, GPU, throughput alto (batching)
+
+Ambos backends exponen la misma interfaz:
+  client.health_check() → bool
+  client.generate(system_prompt, user_prompt) → str
+  client.pull_model() → None
+
+Cambiar de backend no requiere modificar este archivo.
 
 Flujo completo:
-  POST /rag  →  search(query, top_k=3)  →  build_prompt()  →  ollama.chat()  →  respuesta
-
-Por qué Ollama:
-  - Corre localmente como servicio Docker, sin costos de API
-  - Compatible con OpenAI API format (fácil de swapear después)
-  - Modelos livianos: llama3.2:1b (~1.3GB), tinyllama (~600MB)
-  - Perfecto para aprender el patrón RAG sin dependencias externas
+  POST /rag
+    → search(query, top_k)      [ChromaDB HNSW]
+    → build_prompt(query, docs)  [augmentation]
+    → client.generate(...)       [Ollama o vLLM]
+    → respuesta con fuentes
 
 Configuración:
-  OLLAMA_BASE_URL: URL del servicio Ollama (default: http://ollama:11434)
-  OLLAMA_MODEL: Modelo a usar (default: llama3.2:1b)
-  RAG_TOP_K: Número de documentos a recuperar como contexto (default: 3)
-
-Separación de responsabilidades:
-  - rag_service.py: orquesta retrieve → augment → generate
-  - search_service.py: solo retrieval (sin conocimiento de LLM)
-  - ollama_client.py: solo comunicación con Ollama (sin conocimiento de RAG)
+  INFERENCE_BACKEND : "ollama" | "vllm"
+  OLLAMA_BASE_URL   : URL de Ollama (default: http://ollama:11434)
+  VLLM_BASE_URL     : URL de vLLM   (default: http://vllm:8001)
+  OLLAMA_MODEL      : modelo a usar en ambos backends
+  RAG_TOP_K         : documentos de contexto a recuperar
 """
 
 import os
@@ -31,31 +34,47 @@ from utils.logger import get_logger
 from utils.timer import Timer
 import services.search_service as search_service
 from services.ollama_client import OllamaClient, OllamaUnavailableError
+from services.vllm_client import VLLMClient, VLLMUnavailableError
 
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Configuración via variables de entorno
+# Configuración
 # ---------------------------------------------------------------------------
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
-RAG_TOP_K = int(os.getenv("RAG_TOP_K", "3"))
+INFERENCE_BACKEND = os.getenv("INFERENCE_BACKEND", "ollama").lower()
+OLLAMA_BASE_URL   = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+VLLM_BASE_URL     = os.getenv("VLLM_BASE_URL", "http://vllm:8001")
+OLLAMA_MODEL      = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
+RAG_TOP_K         = int(os.getenv("RAG_TOP_K", "3"))
 
-# Cliente Ollama (lazy-initialized)
-_ollama_client: OllamaClient | None = None
+# ---------------------------------------------------------------------------
+# Client factory — lazy-initialized, backend seleccionado por env var
+# ---------------------------------------------------------------------------
+
+_client: OllamaClient | VLLMClient | None = None
 
 
-def get_ollama_client() -> OllamaClient:
-    """Retorna el cliente Ollama, creándolo si no existe."""
-    global _ollama_client
-    if _ollama_client is None:
-        _ollama_client = OllamaClient(base_url=OLLAMA_BASE_URL, model=OLLAMA_MODEL)
-    return _ollama_client
+def get_ollama_client() -> OllamaClient | VLLMClient:
+    """
+    Retorna el cliente LLM activo según INFERENCE_BACKEND.
+
+    Llamado get_ollama_client() por compatibilidad con main.py,
+    pero puede retornar un VLLMClient si INFERENCE_BACKEND=vllm.
+    """
+    global _client
+    if _client is None:
+        if INFERENCE_BACKEND == "vllm":
+            _client = VLLMClient(base_url=VLLM_BASE_URL, model=OLLAMA_MODEL)
+            logger.info("llm_backend_initialized", extra={"backend": "vllm", "url": VLLM_BASE_URL})
+        else:
+            _client = OllamaClient(base_url=OLLAMA_BASE_URL, model=OLLAMA_MODEL)
+            logger.info("llm_backend_initialized", extra={"backend": "ollama", "url": OLLAMA_BASE_URL})
+    return _client
 
 
 # ---------------------------------------------------------------------------
-# Construcción del prompt RAG
+# Prompt builder
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are a knowledgeable AI assistant specialized in machine learning and artificial intelligence.
@@ -63,31 +82,26 @@ Answer questions accurately and concisely based on the provided context.
 If the context doesn't fully answer the question, say so clearly but still provide what you know.
 Always cite which part of the context supports your answer."""
 
+
 def build_prompt(query: str, context_docs: list[dict]) -> str:
     """
-    Construye el prompt RAG concatenando la query con el contexto recuperado.
-
-    Patrón estándar de RAG:
-      SYSTEM: instrucciones del asistente
-      CONTEXT: documentos recuperados (numerados, con score)
-      QUESTION: la query del usuario
+    Construye el prompt RAG con los documentos recuperados como contexto.
 
     Args:
         query: Pregunta del usuario.
-        context_docs: Lista de dicts con {text, score, id} del retriever.
+        context_docs: Lista de {text, score, id} del retriever.
 
     Returns:
-        Prompt completo para enviar al LLM.
+        Prompt completo listo para enviar al LLM.
     """
     context_sections = []
     for i, doc in enumerate(context_docs, 1):
         context_sections.append(
             f"[Document {i}] (relevance: {doc['score']:.2f})\n{doc['text']}"
         )
-
     context_str = "\n\n".join(context_sections)
 
-    prompt = f"""Context information:
+    return f"""Context information:
 ---
 {context_str}
 ---
@@ -95,8 +109,6 @@ def build_prompt(query: str, context_docs: list[dict]) -> str:
 Question: {query}
 
 Answer based on the context above:"""
-
-    return prompt
 
 
 # ---------------------------------------------------------------------------
@@ -109,26 +121,20 @@ def rag(query: str, top_k: int | None = None) -> dict:
 
     Args:
         query: Pregunta del usuario.
-        top_k: Número de documentos de contexto. None → usa RAG_TOP_K env var.
+        top_k: Documentos de contexto. None → usa RAG_TOP_K env var.
 
     Returns:
-        dict con:
-          - answer: Respuesta generada por el LLM
-          - sources: Lista de documentos usados como contexto
-          - model: Modelo Ollama usado
-          - retrieve_ms: Tiempo de retrieval
-          - generate_ms: Tiempo de generación
-          - total_ms: Tiempo total
+        dict con answer, sources, model, backend, retrieve_ms, generate_ms, total_ms.
 
     Raises:
-        OllamaUnavailableError: Si Ollama no está disponible
-        RuntimeError: Si el vector store no está inicializado
+        OllamaUnavailableError | VLLMUnavailableError: Si el LLM no está disponible.
+        RuntimeError: Si el vector store no está inicializado.
     """
     k = top_k if top_k is not None else RAG_TOP_K
 
     with Timer() as total_timer:
 
-        # ── Paso 1: RETRIEVE ─────────────────────────────────────────────
+        # ── Retrieve ─────────────────────────────────────────────────────
         with Timer() as retrieve_timer:
             search_result = search_service.search(query, top_k=k)
             context_docs = search_result["results"]
@@ -143,10 +149,10 @@ def rag(query: str, top_k: int | None = None) -> dict:
             },
         )
 
-        # ── Paso 2: AUGMENT — construir prompt con contexto ───────────────
+        # ── Augment ───────────────────────────────────────────────────────
         prompt = build_prompt(query, context_docs)
 
-        # ── Paso 3: GENERATE — llamar a Ollama ───────────────────────────
+        # ── Generate ──────────────────────────────────────────────────────
         client = get_ollama_client()
         with Timer() as generate_timer:
             answer = client.generate(
@@ -157,6 +163,7 @@ def rag(query: str, top_k: int | None = None) -> dict:
         logger.info(
             "rag_generate_completed",
             extra={
+                "backend": INFERENCE_BACKEND,
                 "model": OLLAMA_MODEL,
                 "answer_length": len(answer),
                 "generate_ms": round(generate_timer.elapsed_ms, 2),
@@ -167,6 +174,7 @@ def rag(query: str, top_k: int | None = None) -> dict:
         "rag_pipeline_completed",
         extra={
             "query_preview": query[:60],
+            "backend": INFERENCE_BACKEND,
             "total_ms": round(total_timer.elapsed_ms, 2),
         },
     )
@@ -175,6 +183,7 @@ def rag(query: str, top_k: int | None = None) -> dict:
         "answer": answer,
         "sources": context_docs,
         "model": OLLAMA_MODEL,
+        "backend": INFERENCE_BACKEND,
         "retrieve_ms": round(retrieve_timer.elapsed_ms, 2),
         "generate_ms": round(generate_timer.elapsed_ms, 2),
         "total_ms": round(total_timer.elapsed_ms, 2),
@@ -182,9 +191,8 @@ def rag(query: str, top_k: int | None = None) -> dict:
 
 
 def is_ollama_available() -> bool:
-    """Verifica si Ollama está disponible y el modelo está cargado."""
+    """Verifica si el backend LLM configurado está disponible."""
     try:
-        client = get_ollama_client()
-        return client.health_check()
+        return get_ollama_client().health_check()
     except Exception:
         return False

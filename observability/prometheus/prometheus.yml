@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s       # cada cuánto Prometheus scrapea métricas
+  evaluation_interval: 15s   # cada cuánto evalúa alertas (si las hubiera)
+
+scrape_configs:
+  - job_name: "inference-service"
+    static_configs:
+      - targets: ["inference-service:8000"]
+    metrics_path: /metrics/prometheus
+    # Etiquetas extra que se agregan a todas las métricas de este job
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis-exporter:9121"]

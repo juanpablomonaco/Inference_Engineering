@@ -185,6 +185,7 @@ class RagResponse(BaseModel):
     answer: str = Field(description="Respuesta generada por el LLM con contexto RAG.")
     sources: list[SearchResult] = Field(description="Documentos usados como contexto.")
     model: str = Field(description="Modelo LLM usado para la generación.")
+    backend: str = Field(description="Backend LLM usado: 'ollama' o 'vllm'.")
     retrieve_ms: float = Field(description="Tiempo de retrieval semántico (ms).")
     generate_ms: float = Field(description="Tiempo de generación LLM (ms).")
     total_ms: float = Field(description="Tiempo total del pipeline RAG (ms).")
