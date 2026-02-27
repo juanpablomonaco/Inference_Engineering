@@ -22,8 +22,8 @@ import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request, Response, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, Response, HTTPException, Depends
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 import models.embedding_model as embedding_model
 import services.search_service as search_service
@@ -31,9 +31,12 @@ import services.embedding_service as embedding_service
 import services.vector_store as vector_store
 import services.rag_service as rag_service
 import services.redis_cache as redis_cache
+import services.prometheus_metrics as prom
 from services.health_service import health_status
 from services.metrics_store import metrics
 from services.ollama_client import OllamaUnavailableError
+from services.auth import require_api_key
+from services.rate_limiter import check_rate_limit
 from models.schemas import (
     EmbeddingRequest, EmbeddingResponse,
     SearchRequest, SearchResponse, SearchResult,
@@ -117,12 +120,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     startup_elapsed = (time.perf_counter() - startup_start) * 1000
 
+    # Actualizar gauges Prometheus con el estado final del startup
+    prom.update_system_gauges(
+        corpus_size=search_service.corpus_size(),
+        model_loaded=health_status.model_loaded,
+        redis_connected=health_status.redis_connected,
+        ollama_ready=health_status.ollama_ready,
+    )
+
     logger.info(
         "application_startup_completed",
         extra={
             "ready": health_status.is_ready(),
             "corpus_size": search_service.corpus_size(),
             "cache_size": embedding_service.cache_size(),
+            "redis": health_status.redis_connected,
+            "ollama": health_status.ollama_ready,
             "total_startup_ms": round(startup_elapsed, 2),
         },
     )
@@ -156,23 +169,30 @@ app = FastAPI(
 async def request_timing_middleware(request: Request, call_next) -> Response:
     """
     Mide la latencia total de cada request HTTP.
-
-    Loguea path, método, status code y duración.
-    Incrementa el contador global de requests.
+    Alimenta tanto el metrics_store JSON como las métricas Prometheus.
     """
     start = time.perf_counter()
     response = await call_next(request)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    elapsed_s = time.perf_counter() - start
+    elapsed_ms = elapsed_s * 1000
 
-    # No contar health checks en el total (evita ruido en métricas)
-    if request.url.path not in ("/health", "/metrics"):
+    path = request.url.path
+    skip_paths = ("/health", "/metrics", "/metrics/prometheus")
+
+    if path not in skip_paths:
         metrics.record_request()
+        prom.record_request(
+            endpoint=path,
+            method=request.method,
+            status_code=response.status_code,
+            duration_s=elapsed_s,
+        )
 
     logger.info(
         "request_completed",
         extra={
             "method": request.method,
-            "path": request.url.path,
+            "path": path,
             "status_code": response.status_code,
             "total_ms": round(elapsed_ms, 2),
         },
@@ -191,7 +211,11 @@ async def request_timing_middleware(request: Request, call_next) -> Response:
     summary="Genera el embedding de un texto",
     tags=["Inference"],
 )
-async def create_embedding(request: EmbeddingRequest) -> EmbeddingResponse:
+async def create_embedding(
+    request: EmbeddingRequest,
+    _auth: str = Depends(require_api_key),
+    _rate: None = Depends(check_rate_limit),
+) -> EmbeddingResponse:
     """
     Recibe un texto y retorna su vector de embedding (384 dimensiones).
 
@@ -221,7 +245,11 @@ async def create_embedding(request: EmbeddingRequest) -> EmbeddingResponse:
     summary="Busca el texto más similar en el corpus",
     tags=["Inference"],
 )
-async def semantic_search(request: SearchRequest) -> SearchResponse:
+async def semantic_search(
+    request: SearchRequest,
+    _auth: str = Depends(require_api_key),
+    _rate: None = Depends(check_rate_limit),
+) -> SearchResponse:
     """
     Recibe una query y retorna los documentos más similares del corpus.
 
@@ -261,7 +289,11 @@ async def semantic_search(request: SearchRequest) -> SearchResponse:
     tags=["Inference"],
     status_code=201,
 )
-async def ingest_document(request: IngestRequest) -> IngestResponse:
+async def ingest_document(
+    request: IngestRequest,
+    _auth: str = Depends(require_api_key),
+    _rate: None = Depends(check_rate_limit),
+) -> IngestResponse:
     """
     Agrega o actualiza un documento en ChromaDB.
 
@@ -290,7 +322,11 @@ async def ingest_document(request: IngestRequest) -> IngestResponse:
     summary="Retrieval-Augmented Generation con Ollama",
     tags=["RAG"],
 )
-async def rag_endpoint(request: RagRequest) -> RagResponse:
+async def rag_endpoint(
+    request: RagRequest,
+    _auth: str = Depends(require_api_key),
+    _rate: None = Depends(check_rate_limit),
+) -> RagResponse:
     """
     Pipeline RAG completo:
       1. Retrieve: busca los top_k documentos más relevantes en ChromaDB
@@ -371,3 +407,31 @@ async def get_metrics() -> MetricsResponse:
     """
     snapshot = metrics.get_snapshot()
     return MetricsResponse(**snapshot)
+
+
+# ---------------------------------------------------------------------------
+# GET /metrics/prometheus  (Fase 5)
+# ---------------------------------------------------------------------------
+
+@app.get(
+    "/metrics/prometheus",
+    summary="Métricas en formato Prometheus text exposition",
+    tags=["Observability"],
+    include_in_schema=True,
+)
+async def prometheus_metrics() -> PlainTextResponse:
+    """
+    Expone métricas en formato Prometheus para scraping.
+
+    Formato compatible con Prometheus scraper y Grafana.
+    Incluye Counters, Histograms y Gauges del servicio.
+
+    Ejemplo de uso con Prometheus:
+      scrape_configs:
+        - job_name: inference-service
+          static_configs:
+            - targets: ['inference-service:8000']
+          metrics_path: /metrics/prometheus
+    """
+    output, content_type = prom.get_prometheus_output()
+    return PlainTextResponse(content=output.decode("utf-8"), media_type=content_type)

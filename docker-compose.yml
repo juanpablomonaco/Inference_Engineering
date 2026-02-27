@@ -46,6 +46,12 @@ services:
       - RAG_TOP_K=3
       # Fase 4: URL de Redis
       - REDIS_URL=redis://redis:6379
+      - REDIS_EMBEDDING_TTL=86400
+      - RATE_LIMIT_REQUESTS=60
+      - RATE_LIMIT_WINDOW_SECONDS=60
+      # Fase 5: API Keys (vacío = auth desactivada para desarrollo)
+      # Para activar: API_KEYS=your-secret-key-1,your-secret-key-2
+      - API_KEYS=
 
     volumes:
       - huggingface-cache:/app/.cache/huggingface
