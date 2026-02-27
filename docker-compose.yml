@@ -3,23 +3,23 @@
 # ---------------------------------------------------------------------------
 #
 # Servicios:
-#   inference-service: FastAPI + SentenceTransformers (Python)
+#   inference-service : FastAPI + SentenceTransformers (Python)
+#   ollama            : LLM local para generación RAG (Fase 3)
+#   redis             : Cache distribuido de embeddings (Fase 4)
 #
-# Para correr:
-#   docker-compose up --build          # primera vez (build + run)
-#   docker-compose up                  # siguientes veces (usa imagen cacheada)
-#   docker-compose up -d               # modo detached (background)
-#   docker-compose logs -f             # ver logs en tiempo real
-#   docker-compose down                # detener y remover contenedores
+# Para correr (stack completo):
+#   docker compose up --build          # primera vez
+#   docker compose up                  # siguientes veces
+#   docker compose up -d               # modo detached (background)
+#   docker compose logs -f             # ver logs en tiempo real
+#   docker compose down                # detener
+#
+# Solo inferencia (sin RAG/Redis):
+#   docker compose up inference-service
 #
 # Nota sobre el startup:
-#   El servicio tarda ~30-60 segundos en la PRIMERA vez que corre porque:
-#   1. Docker construye la imagen (~2-3 min con pip install)
-#   2. El modelo se descarga de HuggingFace (~90MB)
-#   3. El servicio carga el modelo y precomputa el corpus (~10s)
-#
-#   En arranques siguientes, el modelo está cacheado en el volumen
-#   huggingface-cache, por lo que el startup es ~5-10 segundos.
+#   Primera vez: ~5-10 min (build + descarga modelo HF + descarga modelo Ollama)
+#   Siguientes:  ~15-30s (modelos cacheados en volúmenes)
 # ---------------------------------------------------------------------------
 
 version: "3.9"
@@ -32,59 +32,115 @@ services:
       context: ./inference-service
       dockerfile: Dockerfile
 
-    # Nombre del contenedor para referencias fáciles en logs y comandos
     container_name: inference-service
 
     ports:
-      # host:container — el puerto 8000 del contenedor se mapea al 8000 del host
       - "8000:8000"
 
     environment:
-      # Directorio de cache de HuggingFace dentro del contenedor
-      # Debe coincidir con HF_HOME del Dockerfile
       - HF_HOME=/app/.cache/huggingface
-
-      # Nivel de log de Python (DEBUG para desarrollo, INFO para producción)
       - LOG_LEVEL=INFO
+      # Fase 3: URL del servicio Ollama
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3.2:1b
+      - RAG_TOP_K=3
+      # Fase 4: URL de Redis
+      - REDIS_URL=redis://redis:6379
 
     volumes:
-      # Persiste el modelo descargado entre reinicios del contenedor
-      # Sin este volumen, el modelo (~90MB) se re-descargaría cada vez
       - huggingface-cache:/app/.cache/huggingface
-
-      # Persiste el vector store de ChromaDB (Fase 2)
-      # Contiene los embeddings indexados y el HNSW index
       - chroma-data:/app/chroma_data
 
-    # Política de restart: reinicia automáticamente si el proceso falla
-    # "unless-stopped" → reinicia siempre excepto si fue detenido manualmente
+    depends_on:
+      ollama:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
     restart: unless-stopped
 
-    # Health check: Docker verifica que el servicio esté listo
-    # Espera hasta 60s para el startup inicial antes de marcar como unhealthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 90s
 
-    # Límites de recursos (opcionales, útiles para aprender resource management)
+
+  # ── Ollama — LLM local (Fase 3) ──────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+
+    ports:
+      - "11434:11434"
+
+    volumes:
+      # Persiste los modelos descargados (~1-8GB dependiendo del modelo)
+      - ollama-models:/root/.ollama
+
+    restart: unless-stopped
+
+    # Health check: verifica que la API de Ollama responda
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    # Nota: para usar GPU, descomentar:
     # deploy:
     #   resources:
-    #     limits:
-    #       memory: 2G      # El modelo + embeddings usan ~800MB
-    #       cpus: "2.0"
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+
+  # ── Redis — Cache distribuido de embeddings (Fase 4) ─────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+
+    ports:
+      - "6379:6379"
+
+    # Configuración de persistencia Redis:
+    # appendonly yes → AOF (Append Only File) — persiste cada write
+    # Alternativa: rdb snapshots (--save 60 1)
+    command: redis-server --appendonly yes
+
+    volumes:
+      - redis-data:/data
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 
 # ---------------------------------------------------------------------------
 # Volúmenes nombrados
 # ---------------------------------------------------------------------------
 volumes:
-  # Cache de HuggingFace — persiste modelos descargados entre reinicios
+  # Cache de HuggingFace — modelos de embedding (~90MB)
   huggingface-cache:
     driver: local
 
-  # Vector store de ChromaDB — persiste embeddings y HNSW index (Fase 2)
+  # Vector store ChromaDB — embeddings + HNSW index (Fase 2)
   chroma-data:
+    driver: local
+
+  # Modelos Ollama — LLM local (~1-8GB) (Fase 3)
+  ollama-models:
+    driver: local
+
+  # Redis AOF — cache de embeddings persistente (Fase 4)
+  redis-data:
     driver: local

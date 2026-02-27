@@ -29,12 +29,15 @@ import models.embedding_model as embedding_model
 import services.search_service as search_service
 import services.embedding_service as embedding_service
 import services.vector_store as vector_store
+import services.rag_service as rag_service
 from services.health_service import health_status
 from services.metrics_store import metrics
+from services.ollama_client import OllamaUnavailableError
 from models.schemas import (
     EmbeddingRequest, EmbeddingResponse,
     SearchRequest, SearchResponse, SearchResult,
     IngestRequest, IngestResponse,
+    RagRequest, RagResponse,
     HealthResponse, MetricsResponse,
 )
 from utils.logger import get_logger
@@ -88,6 +91,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         health_status.set_corpus_initialized(False)
         health_status.set_cache_ready(False)
 
+    # [4] Verificar Ollama y descargar modelo si es necesario (Fase 3)
+    try:
+        if not rag_service.is_ollama_available():
+            logger.info("ollama_model_not_found_pulling", extra={"model": rag_service.OLLAMA_MODEL})
+            rag_service.get_ollama_client().pull_model()
+        else:
+            logger.info("ollama_ready", extra={"model": rag_service.OLLAMA_MODEL})
+    except Exception as e:
+        # Ollama no disponible no bloquea el startup — /search sigue funcionando
+        logger.warning("ollama_unavailable_at_startup", extra={"error": str(e)})
+
     startup_elapsed = (time.perf_counter() - startup_start) * 1000
 
     logger.info(
@@ -116,7 +130,7 @@ app = FastAPI(
         "Servicio de inferencia educativo que demuestra embeddings, "
         "búsqueda semántica y observabilidad con FastAPI + SentenceTransformers."
     ),
-    version="3.0.0",
+    version="4.0.0",
     lifespan=lifespan,
 )
 
@@ -251,6 +265,50 @@ async def ingest_document(request: IngestRequest) -> IngestResponse:
         raise HTTPException(status_code=500, detail=str(e))
 
     return IngestResponse(**result)
+
+
+# ---------------------------------------------------------------------------
+# POST /rag  (Fase 3)
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/rag",
+    response_model=RagResponse,
+    summary="Retrieval-Augmented Generation con Ollama",
+    tags=["RAG"],
+)
+async def rag_endpoint(request: RagRequest) -> RagResponse:
+    """
+    Pipeline RAG completo:
+      1. Retrieve: busca los top_k documentos más relevantes en ChromaDB
+      2. Augment: construye un prompt con el contexto recuperado
+      3. Generate: llama a Ollama para generar la respuesta final
+
+    Requiere que el servicio Ollama esté corriendo con el modelo configurado.
+    Si Ollama no está disponible, retorna 503 con instrucciones.
+    """
+    if not health_status.is_ready():
+        raise HTTPException(status_code=503, detail="Service not ready.")
+
+    try:
+        result = rag_service.rag(request.query, top_k=request.top_k)
+    except OllamaUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Ollama LLM is unavailable: {str(e)}. "
+                   "Make sure the ollama service is running in docker-compose.",
+        )
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return RagResponse(
+        answer=result["answer"],
+        sources=[SearchResult(**s) for s in result["sources"]],
+        model=result["model"],
+        retrieve_ms=result["retrieve_ms"],
+        generate_ms=result["generate_ms"],
+        total_ms=result["total_ms"],
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -164,6 +164,39 @@ class MetricsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# POST /rag  (Fase 3)
+# ---------------------------------------------------------------------------
+
+class RagRequest(BaseModel):
+    """Cuerpo de la request para RAG."""
+
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=2048,
+        description="Pregunta para el pipeline RAG.",
+        examples=["How does backpropagation work in neural networks?"],
+    )
+    top_k: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Número de documentos de contexto a recuperar.",
+    )
+
+
+class RagResponse(BaseModel):
+    """Respuesta del endpoint /rag."""
+
+    answer: str = Field(description="Respuesta generada por el LLM con contexto RAG.")
+    sources: list[SearchResult] = Field(description="Documentos usados como contexto.")
+    model: str = Field(description="Modelo LLM usado para la generación.")
+    retrieve_ms: float = Field(description="Tiempo de retrieval semántico (ms).")
+    generate_ms: float = Field(description="Tiempo de generación LLM (ms).")
+    total_ms: float = Field(description="Tiempo total del pipeline RAG (ms).")
+
+
+# ---------------------------------------------------------------------------
 # Modelo genérico para respuestas de error
 # ---------------------------------------------------------------------------
 
