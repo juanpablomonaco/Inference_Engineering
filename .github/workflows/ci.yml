@@ -31,9 +31,18 @@ jobs:
         # ruff verifica: imports no usados, variables no usadas,
         # estilo PEP8, complejidad, etc. — más rápido que flake8 + pylint
 
-      - name: Run ruff formatter check
-        run: ruff format --check inference-service/
-        # Verifica que el código esté formateado (no modifica archivos)
+      - name: Auto-format with ruff and commit if needed
+        run: |
+          ruff format inference-service/
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add inference-service/
+            git commit -m "style: auto-format with ruff"
+            git push
+          fi
+        # Aplica el formato automáticamente y hace commit si hubo cambios.
+        # Así el CI nunca falla por formateo — simplemente lo corrige.
 
   # ---------------------------------------------------------------------------
   # Job 2: Tests unitarios con pytest
@@ -46,6 +55,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}  # asegura que usa el commit más reciente (post-format)
 
       - name: Set up Python
         uses: actions/setup-python@v5
