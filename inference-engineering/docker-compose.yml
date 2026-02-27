@@ -1,0 +1,84 @@
+# ---------------------------------------------------------------------------
+# docker-compose.yml — Inference Engineering Stack
+# ---------------------------------------------------------------------------
+#
+# Servicios:
+#   inference-service: FastAPI + SentenceTransformers (Python)
+#
+# Para correr:
+#   docker-compose up --build          # primera vez (build + run)
+#   docker-compose up                  # siguientes veces (usa imagen cacheada)
+#   docker-compose up -d               # modo detached (background)
+#   docker-compose logs -f             # ver logs en tiempo real
+#   docker-compose down                # detener y remover contenedores
+#
+# Nota sobre el startup:
+#   El servicio tarda ~30-60 segundos en la PRIMERA vez que corre porque:
+#   1. Docker construye la imagen (~2-3 min con pip install)
+#   2. El modelo se descarga de HuggingFace (~90MB)
+#   3. El servicio carga el modelo y precomputa el corpus (~10s)
+#
+#   En arranques siguientes, el modelo está cacheado en el volumen
+#   huggingface-cache, por lo que el startup es ~5-10 segundos.
+# ---------------------------------------------------------------------------
+
+version: "3.9"
+
+services:
+
+  # ── Servicio de Inferencia (Python/FastAPI) ──────────────────────────────
+  inference-service:
+    build:
+      context: ./inference-service
+      dockerfile: Dockerfile
+
+    # Nombre del contenedor para referencias fáciles en logs y comandos
+    container_name: inference-service
+
+    ports:
+      # host:container — el puerto 8000 del contenedor se mapea al 8000 del host
+      - "8000:8000"
+
+    environment:
+      # Directorio de cache de HuggingFace dentro del contenedor
+      # Debe coincidir con HF_HOME del Dockerfile
+      - HF_HOME=/app/.cache/huggingface
+
+      # Nivel de log de Python (DEBUG para desarrollo, INFO para producción)
+      - LOG_LEVEL=INFO
+
+    volumes:
+      # Persiste el modelo descargado entre reinicios del contenedor
+      # Sin este volumen, el modelo (~90MB) se re-descargaría cada vez
+      - huggingface-cache:/app/.cache/huggingface
+
+    # Política de restart: reinicia automáticamente si el proceso falla
+    # "unless-stopped" → reinicia siempre excepto si fue detenido manualmente
+    restart: unless-stopped
+
+    # Health check: Docker verifica que el servicio esté listo
+    # Espera hasta 60s para el startup inicial antes de marcar como unhealthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+    # Límites de recursos (opcionales, útiles para aprender resource management)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 2G      # El modelo + embeddings usan ~800MB
+    #       cpus: "2.0"
+
+
+# ---------------------------------------------------------------------------
+# Volúmenes nombrados
+# ---------------------------------------------------------------------------
+volumes:
+  # Cache de HuggingFace — persiste modelos descargados entre reinicios
+  # Listarlo aquí lo hace un "named volume" gestionado por Docker
+  # Ubicación en host: /var/lib/docker/volumes/inference-engineering_huggingface-cache
+  huggingface-cache:
+    driver: local
