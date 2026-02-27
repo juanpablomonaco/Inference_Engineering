@@ -52,6 +52,10 @@ services:
       # Sin este volumen, el modelo (~90MB) se re-descargaría cada vez
       - huggingface-cache:/app/.cache/huggingface
 
+      # Persiste el vector store de ChromaDB (Fase 2)
+      # Contiene los embeddings indexados y el HNSW index
+      - chroma-data:/app/chroma_data
+
     # Política de restart: reinicia automáticamente si el proceso falla
     # "unless-stopped" → reinicia siempre excepto si fue detenido manualmente
     restart: unless-stopped
@@ -78,7 +82,9 @@ services:
 # ---------------------------------------------------------------------------
 volumes:
   # Cache de HuggingFace — persiste modelos descargados entre reinicios
-  # Listarlo aquí lo hace un "named volume" gestionado por Docker
-  # Ubicación en host: /var/lib/docker/volumes/inference-engineering_huggingface-cache
   huggingface-cache:
+    driver: local
+
+  # Vector store de ChromaDB — persiste embeddings y HNSW index (Fase 2)
+  chroma-data:
     driver: local

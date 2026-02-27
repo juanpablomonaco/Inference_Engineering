@@ -28,11 +28,13 @@ from fastapi.responses import JSONResponse
 import models.embedding_model as embedding_model
 import services.search_service as search_service
 import services.embedding_service as embedding_service
+import services.vector_store as vector_store
 from services.health_service import health_status
 from services.metrics_store import metrics
 from models.schemas import (
     EmbeddingRequest, EmbeddingResponse,
-    SearchRequest, SearchResponse,
+    SearchRequest, SearchResponse, SearchResult,
+    IngestRequest, IngestResponse,
     HealthResponse, MetricsResponse,
 )
 from utils.logger import get_logger
@@ -70,7 +72,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         # En producción podrías hacer raise aquí para fallar el startup
         # y forzar un restart del contenedor.
 
-    # [2] Precomputar embeddings del corpus (también llena el cache)
+    # [2] Inicializar ChromaDB vector store
+    try:
+        vector_store.init_store()
+    except Exception as e:
+        logger.error("vector_store_init_failed", extra={"error": str(e)})
+
+    # [3] Indexar corpus seed en ChromaDB (idempotente via upsert)
     try:
         search_service.precompute()
         health_status.set_corpus_initialized(True)
@@ -108,7 +116,7 @@ app = FastAPI(
         "Servicio de inferencia educativo que demuestra embeddings, "
         "búsqueda semántica y observabilidad con FastAPI + SentenceTransformers."
     ),
-    version="2.0.0",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -188,10 +196,11 @@ async def create_embedding(request: EmbeddingRequest) -> EmbeddingResponse:
 )
 async def semantic_search(request: SearchRequest) -> SearchResponse:
     """
-    Recibe una query y retorna el documento más similar del corpus.
+    Recibe una query y retorna los documentos más similares del corpus.
 
-    Solo computa el embedding de la query. Los embeddings del corpus
-    ya están precomputados en memoria desde el startup.
+    - top_k: cuántos resultados retornar (default 1).
+    - Solo computa el embedding de la query.
+    - Los embeddings del corpus están en ChromaDB (HNSW index).
     """
     if not health_status.is_ready():
         raise HTTPException(
@@ -200,13 +209,48 @@ async def semantic_search(request: SearchRequest) -> SearchResponse:
         )
 
     try:
-        result = search_service.search(request.query)
+        result = search_service.search(request.query, top_k=request.top_k)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-    return SearchResponse(**result)
+    return SearchResponse(
+        result=result["result"],
+        score=result["score"],
+        results=[SearchResult(**r) for r in result["results"]],
+        elapsed_ms=result["elapsed_ms"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /ingest  (Fase 2)
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/ingest",
+    response_model=IngestResponse,
+    summary="Indexa un documento en el vector store",
+    tags=["Inference"],
+    status_code=201,
+)
+async def ingest_document(request: IngestRequest) -> IngestResponse:
+    """
+    Agrega o actualiza un documento en ChromaDB.
+
+    - Genera el embedding del texto y lo almacena con upsert.
+    - Idempotente: enviar el mismo id actualiza el documento existente.
+    - El documento queda disponible para /search inmediatamente.
+    """
+    if not embedding_model.is_loaded():
+        raise HTTPException(status_code=503, detail="Model is not loaded yet.")
+
+    try:
+        result = search_service.ingest(request.id, request.text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return IngestResponse(**result)
 
 
 # ---------------------------------------------------------------------------

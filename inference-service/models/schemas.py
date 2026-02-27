@@ -61,20 +61,68 @@ class SearchRequest(BaseModel):
         description="Pregunta o texto a buscar en el corpus.",
         examples=["What is backpropagation?"],
     )
+    top_k: int = Field(
+        default=1,
+        ge=1,
+        le=20,
+        description="Número de resultados a retornar (top-k más similares).",
+    )
+
+
+class SearchResult(BaseModel):
+    """Un resultado individual de búsqueda semántica."""
+
+    id: str = Field(description="ID del documento.")
+    text: str = Field(description="Contenido del documento.")
+    score: float = Field(description="Score de similitud coseno (0.0 a 1.0).")
 
 
 class SearchResponse(BaseModel):
     """Respuesta del endpoint /search."""
 
     result: str = Field(
-        description="Texto del corpus más similar a la query."
+        description="Texto del documento más similar (top-1)."
     )
     score: float = Field(
-        description="Score de similitud coseno entre query y resultado (0.0 a 1.0)."
+        description="Score de similitud coseno del top-1 (0.0 a 1.0)."
+    )
+    results: list[SearchResult] = Field(
+        description="Lista completa de resultados top-k."
     )
     elapsed_ms: float = Field(
         description="Tiempo total de procesamiento en milisegundos."
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /ingest  (Fase 2)
+# ---------------------------------------------------------------------------
+
+class IngestRequest(BaseModel):
+    """Cuerpo de la request para ingestar un documento."""
+
+    id: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="Identificador único del documento.",
+        examples=["doc_custom_001"],
+    )
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=8192,
+        description="Contenido textual del documento a indexar.",
+        examples=["Gradient descent is an optimization algorithm..."],
+    )
+
+
+class IngestResponse(BaseModel):
+    """Respuesta del endpoint /ingest."""
+
+    id: str = Field(description="ID del documento indexado.")
+    total_documents: int = Field(description="Total de documentos en el store tras el upsert.")
+    elapsed_ms: float = Field(description="Tiempo de procesamiento en milisegundos.")
 
 
 # ---------------------------------------------------------------------------
