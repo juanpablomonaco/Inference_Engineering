@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: write   # permite que github-actions[bot] haga push de commits de formato
+
 jobs:
   # ---------------------------------------------------------------------------
   # Job 1: Lint con ruff (fast Python linter)
